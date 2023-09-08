@@ -89,6 +89,19 @@ def _team_sizes(rating_groups):
     del team_sizes[0]
     return team_sizes
 
+def _squad_sizes(rating_groups):
+    squad_sizes = []
+    for team in rating_groups:
+        for squad in team:
+            if isinstance(squad, Rating):
+                squad_size = 1
+            else:
+                squad_size = len(squad)
+            squad_size_list = [squad_size-1] * squad_size  # -1 to match with array indexing
+            squad_sizes.extend(squad_size_list)
+    return squad_sizes
+
+
 
 def _floating_point_error(env):
     if env.backend == 'mpmath':
@@ -182,6 +195,11 @@ class TrueSkill(object):
         self.tau = tau
         self.draw_probability = draw_probability
         self.backend = backend
+
+        # Introduce variables for squadOffset
+        team_max_size = 2
+        self.squad_offset = [Variable() for _ in range(team_max_size)]
+
         if isinstance(backend, tuple):
             self.cdf, self.pdf, self.ppf = backend
         else:
@@ -329,7 +347,10 @@ class TrueSkill(object):
         group_size = len(rating_groups)
         # create variables
         rating_vars = [Variable() for x in range(size)]
+        squad_sizes = _squad_sizes(rating_groups)
         perf_vars = [Variable() for x in range(size)]
+        for perf_var, squad_size in zip(perf_vars, squad_sizes):
+            perf_var.set(self.squad_offset[squad_size])
         team_perf_vars = [Variable() for x in range(group_size)]
         team_diff_vars = [Variable() for x in range(group_size - 1)]
         team_sizes = _team_sizes(rating_groups)
@@ -337,6 +358,10 @@ class TrueSkill(object):
         def build_rating_layer():
             for rating_var, rating in zip(rating_vars, flatten_ratings):
                 yield PriorFactor(rating_var, rating, self.tau)
+        def build_squad_layer():
+            for perf_var, squad_size in zip(perf_vars, squad_sizes):
+                squad_var = self.squad_offset[squad_size]
+                yield SumFactor(perf_var, [squad_var], [1])
         def build_perf_layer():
             for rating_var, perf_var in zip(rating_vars, perf_vars):
                 yield LikelihoodFactor(rating_var, perf_var, self.beta ** 2)
@@ -373,10 +398,10 @@ class TrueSkill(object):
                 yield TruncateFactor(team_diff_var,
                                      v_func, w_func, draw_margin)
         # build layers
-        return (build_rating_layer, build_perf_layer, build_team_perf_layer,
+        return (build_rating_layer, build_squad_layer, build_perf_layer, build_team_perf_layer,
                 build_team_diff_layer, build_trunc_layer)
 
-    def run_schedule(self, build_rating_layer, build_perf_layer,
+    def run_schedule(self, build_rating_layer, build_squad_layer, build_perf_layer,
                      build_team_perf_layer, build_team_diff_layer,
                      build_trunc_layer, min_delta=DELTA):
         """
@@ -392,9 +417,10 @@ class TrueSkill(object):
             return layers_built
         # gray arrows
         layers_built = build([build_rating_layer,
+                              build_squad_layer,
                               build_perf_layer,
                               build_team_perf_layer])
-        rating_layer, perf_layer, team_perf_layer = layers_built
+        rating_layer, squad_layer, perf_layer, team_perf_layer = layers_built
         for f in chain(*layers_built):
             f.down()
         # arrow #1, #2, #3
