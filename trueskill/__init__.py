@@ -569,6 +569,7 @@ class TrueSkill(object):
 
         """
         rating_groups, keys = self.validate_rating_groups(rating_groups)
+        squad_sizes, rating_groups = _squad_sizes(rating_groups)
         weights = self.validate_weights(weights, rating_groups, keys)
         flatten_ratings = sum(map(tuple, rating_groups), ())
         flatten_weights = sum(map(tuple, weights), ())
