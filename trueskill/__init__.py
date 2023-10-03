@@ -20,7 +20,7 @@ from six.moves import map, range, zip
 from .__about__ import __version__  # noqa
 from .backends import choose_backend
 from .factorgraph import (LikelihoodFactor, PriorFactor, SumFactor,
-                          TruncateFactor, Variable)
+                          TruncateFactor, Variable, LockedVariable)
 from .mathematics import Gaussian, Matrix
 
 
@@ -202,9 +202,11 @@ class TrueSkill(object):
         self.backend = backend
 
         # Introduce variables for squadOffset
-        team_max_size = 2
-        self.squad_offset = [Variable() for _ in range(team_max_size)]
         team_max_size = 5
+        self.squad_offset = [LockedVariable(pi=0, tau=0)]
+        unlocked_variables = [Variable() for _ in range(team_max_size-1)]
+        self.squad_offset.extend(unlocked_variables)
+        # self.squad_offset = [Variable() for _ in range(team_max_size)]
 
         if isinstance(backend, tuple):
             self.cdf, self.pdf, self.ppf = backend

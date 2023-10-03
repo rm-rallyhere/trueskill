@@ -19,7 +19,7 @@ from .mathematics import Gaussian, inf
 
 
 __all__ = ['Variable', 'PriorFactor', 'LikelihoodFactor', 'SumFactor',
-           'TruncateFactor']
+           'TruncateFactor', 'LockedVariable']
 
 
 class Node(object):
@@ -66,6 +66,20 @@ class Variable(Node, Gaussian):
                 len(self.messages), '' if len(self.messages) == 1 else 's')
         return '<%s %s with %d connection%s>' % args
 
+
+class LockedVariable(Variable):
+
+        def __init__(self, pi, tau):
+            super(LockedVariable, self).__init__()
+            self.val = Gaussian(pi=pi, tau=tau)
+            self.set(self.val)
+
+        def update_message(self, factor, pi=0, tau=0, message=None):
+            # raise ValueError('A locked variable cannot be updated')
+            pass
+
+        def update_value(self, factor, pi=0, tau=0, value=None):
+            return self.set(self.val)
 
 class Factor(Node):
 
