@@ -203,7 +203,7 @@ class TrueSkill(object):
 
         # Introduce variables for squadOffset
         team_max_size = 5
-        self.squad_offset = [LockedVariable(pi=0, tau=0)]
+        self.squad_offset = [LockedVariable(mu=0, sigma=1e-10)]
         unlocked_variables = [Variable() for _ in range(team_max_size-1)]
         self.squad_offset.extend(unlocked_variables)
         # self.squad_offset = [Variable() for _ in range(team_max_size)]

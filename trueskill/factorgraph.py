@@ -69,9 +69,9 @@ class Variable(Node, Gaussian):
 
 class LockedVariable(Variable):
 
-        def __init__(self, pi, tau):
+        def __init__(self, mu, sigma):
             super(LockedVariable, self).__init__()
-            self.val = Gaussian(pi=pi, tau=tau)
+            self.val = Gaussian(mu=mu, sigma=sigma)
             self.set(self.val)
 
         def update_message(self, factor, pi=0, tau=0, message=None):
