@@ -204,6 +204,7 @@ class TrueSkill(object):
         # Introduce variables for squadOffset
         team_max_size = 2
         self.squad_offset = [Variable() for _ in range(team_max_size)]
+        team_max_size = 5
 
         if isinstance(backend, tuple):
             self.cdf, self.pdf, self.ppf = backend
