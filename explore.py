@@ -13,7 +13,7 @@ player_ids = [i for i in range(10)]
 
 skills = collections.defaultdict(lambda: trueskill.Rating())
 
-ts = trueskill.TrueSkill(backend="scipy")
+ts = trueskill.TrueSkill(backend="mpmath")
 
 def create_match(player_ids: List[uuid.uuid4]):
     players = random.choice(player_ids, size=4, replace=False)
@@ -47,7 +47,8 @@ def get_team_skills(team: Iterable):
         team_skills.append(tuple(squad_skills))
     return tuple(team_skills)
 
-
+import mpmath
+mpmath.mp.dps = 100
 for match in matches:
     t1_ids, t2_ids = match
     t1, t2 = get_team_skills(t1_ids), get_team_skills(t2_ids)
@@ -59,5 +60,6 @@ for match in matches:
     ratings = [i for team_rating in rated for i in team_rating]
     skills.update(zip(players, ratings))
 
+    print(ts.squad_offset[1].mu, ts.squad_offset[1].sigma)
 print(skills)
 
