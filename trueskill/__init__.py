@@ -201,11 +201,11 @@ class TrueSkill(object):
         self.draw_probability = draw_probability
         self.backend = backend
 
-        # Introduce variables for squadOffset
-        team_max_size = 5
-        self.squad_offset = [LockedVariable(mu=0, sigma=1e-10)]
-        unlocked_variables = [Variable() for _ in range(team_max_size-1)]
-        self.squad_offset.extend(unlocked_variables)
+        # # Introduce variables for squadOffset
+        # team_max_size = 5
+        # self.squad_offset = [LockedVariable(mu=0, sigma=1)]
+        # unlocked_variables = [Variable() for _ in range(team_max_size-1)]
+        # self.squad_offset.extend(unlocked_variables)
         # self.squad_offset = [Variable() for _ in range(team_max_size)]
 
         if isinstance(backend, tuple):
@@ -365,13 +365,18 @@ class TrueSkill(object):
         team_perf_vars = [Variable() for x in range(group_size)]
         team_diff_vars = [Variable() for x in range(group_size - 1)]
         team_sizes = _team_sizes(rating_groups)
+        # Introduce variables for squadOffset
+        team_max_size = 5
+        squad_offset = [LockedVariable(mu=0, sigma=1)]
+        unlocked_variables = [Variable() for _ in range(team_max_size - 1)]
+        squad_offset.extend(unlocked_variables)
         # layer builders
         def build_rating_layer():
             for rating_var, rating in zip(rating_vars, flatten_ratings):
                 yield PriorFactor(rating_var, rating, self.tau)
         def build_squad_layer():
             for perf_var, squad_size in zip(perf_vars, squad_sizes):
-                squad_var = self.squad_offset[squad_size]
+                squad_var = squad_offset[squad_size]
                 yield SumFactor(perf_var, [squad_var], [1])
         def build_perf_layer():
             for rating_var, perf_var in zip(rating_vars, perf_vars):
