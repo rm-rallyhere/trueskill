@@ -367,19 +367,25 @@ class TrueSkill(object):
         team_sizes = _team_sizes(rating_groups)
         # Introduce variables for squadOffset
         team_max_size = 5
-        squad_offset = [LockedVariable(mu=0, sigma=1)]
+        squad_vars = [LockedVariable(mu=0, sigma=1)]
         unlocked_variables = [Variable() for _ in range(team_max_size - 1)]
-        squad_offset.extend(unlocked_variables)
+        squad_vars.extend(unlocked_variables)
+
+        rating_plus_squad_vars = [Variable() for x in range(size)]
+
         # layer builders
         def build_rating_layer():
             for rating_var, rating in zip(rating_vars, flatten_ratings):
                 yield PriorFactor(rating_var, rating, self.tau)
         def build_squad_layer():
-            for perf_var, squad_size in zip(perf_vars, squad_sizes):
-                squad_var = squad_offset[squad_size]
-                yield SumFactor(perf_var, [squad_var], [1])
+            for squad_var, squad_size in zip(squad_vars, squad_sizes):
+                squad_offset = self.squad_offset[squad_size]
+                yield PriorFactor(squad_var, squad_offset, self.tau)  # TODO: Set a value for squad here
+        def build_rating_plus_squad_layer():
+            for rating_plus_squad_var, rating_var, squad_var in zip(rating_plus_squad_vars, rating_vars, squad_vars):
+                yield SumFactor(rating_plus_squad_var, [rating_var, squad_var], [1, 1])
         def build_perf_layer():
-            for rating_var, perf_var in zip(rating_vars, perf_vars):
+            for rating_var, perf_var in zip(rating_plus_squad_vars, perf_vars):
                 yield LikelihoodFactor(rating_var, perf_var, self.beta ** 2)
         def build_team_perf_layer():
             for team, team_perf_var in enumerate(team_perf_vars):
@@ -414,10 +420,10 @@ class TrueSkill(object):
                 yield TruncateFactor(team_diff_var,
                                      v_func, w_func, draw_margin)
         # build layers
-        return (build_rating_layer, build_squad_layer, build_perf_layer, build_team_perf_layer,
+        return (build_rating_layer, build_squad_layer, build_rating_plus_squad_layer, build_perf_layer, build_team_perf_layer,
                 build_team_diff_layer, build_trunc_layer)
 
-    def run_schedule(self, build_rating_layer, build_squad_layer, build_perf_layer,
+    def run_schedule(self, build_rating_layer, build_squad_layer, build_rating_plus_squad_layer, build_perf_layer,
                      build_team_perf_layer, build_team_diff_layer,
                      build_trunc_layer, min_delta=DELTA):
         """
@@ -434,9 +440,10 @@ class TrueSkill(object):
         # gray arrows
         layers_built = build([build_rating_layer,
                               build_squad_layer,
+                              build_rating_plus_squad_layer,
                               build_perf_layer,
                               build_team_perf_layer])
-        rating_layer, squad_layer, perf_layer, team_perf_layer = layers_built
+        rating_layer, squad_layer, rating_plus_squad_layer, perf_layer, team_perf_layer = layers_built
         for f in chain(*layers_built):
             f.down()
         # arrow #1, #2, #3
@@ -471,7 +478,7 @@ class TrueSkill(object):
                 f.up(x)
         for f in perf_layer:
             f.up()
-        for f in squad_layer:
+        for f in rating_plus_squad_layer:
             f.up()
         return layers
 
