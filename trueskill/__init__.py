@@ -20,7 +20,7 @@ from six.moves import map, range, zip
 from .__about__ import __version__  # noqa
 from .backends import choose_backend
 from .factorgraph import (LikelihoodFactor, PriorFactor, SumFactor,
-                          TruncateFactor, Variable)
+                          TruncateFactor, Variable, LockedVariable)
 from .mathematics import Gaussian, Matrix
 
 
@@ -85,9 +85,27 @@ def _team_sizes(rating_groups):
     """Makes a size map of each teams."""
     team_sizes = [0]
     for group in rating_groups:
-        team_sizes.append(len(group) + team_sizes[-1])
+        team_size = len(group)
+        # for squad in group:
+        #     team_size += len(squad)
+        team_sizes.append(team_size + team_sizes[-1])
     del team_sizes[0]
     return team_sizes
+
+def _squad_sizes(rating_groups):
+    squad_sizes = []
+    unsquad_groups = []
+    for team in rating_groups:
+        for squad in team:
+            if isinstance(squad, Rating):
+                squad_size = 1
+            else:
+                squad_size = len(squad)
+            squad_size_list = [squad_size-1] * squad_size  # -1 to match with array indexing
+            squad_sizes.extend(squad_size_list)
+        unsquad_groups.append([s for squad in team for s in squad])
+    return squad_sizes, unsquad_groups
+
 
 
 def _floating_point_error(env):
@@ -182,6 +200,14 @@ class TrueSkill(object):
         self.tau = tau
         self.draw_probability = draw_probability
         self.backend = backend
+
+        # # Introduce variables for squadOffset
+        team_max_size = 5
+        self.squad_offset = [LockedVariable(mu=0, sigma=1)]
+        unlocked_variables = [Variable() for _ in range(team_max_size-1)]
+        self.squad_offset.extend(unlocked_variables)
+        self.squad_offset = [Variable() for _ in range(team_max_size)]
+
         if isinstance(backend, tuple):
             self.cdf, self.pdf, self.ppf = backend
         else:
@@ -292,6 +318,7 @@ class TrueSkill(object):
     def validate_weights(self, weights, rating_groups, keys=None):
         if weights is None:
             weights = [(1,) * len(g) for g in rating_groups]
+            # weights = [[(1,) for s in g for p in s] for g in rating_groups]
         elif isinstance(weights, dict):
             weights_dict, weights = weights, []
             for x, group in enumerate(rating_groups):
@@ -303,7 +330,7 @@ class TrueSkill(object):
                     w.append(weights_dict.get((x, y), 1))
         return weights
 
-    def factor_graph_builders(self, rating_groups, ranks, weights):
+    def factor_graph_builders(self, rating_groups, ranks, weights, squad_sizes):
         """Makes nodes for the TrueSkill factor graph.
 
         Here's an example of a TrueSkill factor graph when 1 vs 2 vs 1 match::
@@ -323,22 +350,42 @@ class TrueSkill(object):
                trunc_layer:   O   O   (TruncateFactor)
 
         """
+        # squad_sizes, rating_groups = _squad_sizes(rating_groups)
+
         flatten_ratings = sum(map(tuple, rating_groups), ())
         flatten_weights = sum(map(tuple, weights), ())
         size = len(flatten_ratings)
         group_size = len(rating_groups)
         # create variables
         rating_vars = [Variable() for x in range(size)]
+
         perf_vars = [Variable() for x in range(size)]
+        # for perf_var, squad_size in zip(perf_vars, squad_sizes):
+        #     perf_var.set(self.squad_offset[squad_size])
         team_perf_vars = [Variable() for x in range(group_size)]
         team_diff_vars = [Variable() for x in range(group_size - 1)]
         team_sizes = _team_sizes(rating_groups)
+        # Introduce variables for squadOffset
+        team_max_size = 5
+        squad_vars = [LockedVariable(mu=0, sigma=1)]
+        unlocked_variables = [Variable() for _ in range(team_max_size - 1)]
+        squad_vars.extend(unlocked_variables)
+
+        rating_plus_squad_vars = [Variable() for x in range(size)]
+
         # layer builders
         def build_rating_layer():
             for rating_var, rating in zip(rating_vars, flatten_ratings):
                 yield PriorFactor(rating_var, rating, self.tau)
+        def build_squad_layer():
+            for squad_var, squad_size in zip(squad_vars, squad_sizes):
+                squad_offset = self.squad_offset[squad_size]
+                yield PriorFactor(squad_var, squad_offset, self.tau)  # TODO: Set a value for squad here
+        def build_rating_plus_squad_layer():
+            for rating_plus_squad_var, rating_var, squad_var in zip(rating_plus_squad_vars, rating_vars, squad_vars):
+                yield SumFactor(rating_plus_squad_var, [rating_var, squad_var], [1, 1])
         def build_perf_layer():
-            for rating_var, perf_var in zip(rating_vars, perf_vars):
+            for rating_var, perf_var in zip(rating_plus_squad_vars, perf_vars):
                 yield LikelihoodFactor(rating_var, perf_var, self.beta ** 2)
         def build_team_perf_layer():
             for team, team_perf_var in enumerate(team_perf_vars):
@@ -373,10 +420,10 @@ class TrueSkill(object):
                 yield TruncateFactor(team_diff_var,
                                      v_func, w_func, draw_margin)
         # build layers
-        return (build_rating_layer, build_perf_layer, build_team_perf_layer,
+        return (build_rating_layer, build_squad_layer, build_rating_plus_squad_layer, build_perf_layer, build_team_perf_layer,
                 build_team_diff_layer, build_trunc_layer)
 
-    def run_schedule(self, build_rating_layer, build_perf_layer,
+    def run_schedule(self, build_rating_layer, build_squad_layer, build_rating_plus_squad_layer, build_perf_layer,
                      build_team_perf_layer, build_team_diff_layer,
                      build_trunc_layer, min_delta=DELTA):
         """
@@ -392,16 +439,18 @@ class TrueSkill(object):
             return layers_built
         # gray arrows
         layers_built = build([build_rating_layer,
+                              build_squad_layer,
+                              build_rating_plus_squad_layer,
                               build_perf_layer,
                               build_team_perf_layer])
-        rating_layer, perf_layer, team_perf_layer = layers_built
+        rating_layer, squad_layer, rating_plus_squad_layer, perf_layer, team_perf_layer = layers_built
         for f in chain(*layers_built):
             f.down()
         # arrow #1, #2, #3
         team_diff_layer, trunc_layer = build([build_team_diff_layer,
                                               build_trunc_layer])
         team_diff_len = len(team_diff_layer)
-        for x in range(10):
+        for x in range(10):  # Why is this hard limited to 10?
             if team_diff_len == 1:
                 # only two teams
                 team_diff_layer[0].down()
@@ -428,6 +477,8 @@ class TrueSkill(object):
             for x in range(len(f.vars) - 1):
                 f.up(x)
         for f in perf_layer:
+            f.up()
+        for f in rating_plus_squad_layer:
             f.up()
         return layers
 
@@ -476,6 +527,7 @@ class TrueSkill(object):
 
         """
         rating_groups, keys = self.validate_rating_groups(rating_groups)
+        squad_sizes, rating_groups = _squad_sizes(rating_groups)
         weights = self.validate_weights(weights, rating_groups, keys)
         group_size = len(rating_groups)
         if ranks is None:
@@ -493,11 +545,14 @@ class TrueSkill(object):
             # make weights to be greater than 0
             sorted_weights.append(max(min_delta, w_) for w_ in w)
         # build factor graph
-        args = (sorted_rating_groups, sorted_ranks, sorted_weights)
+        args = (sorted_rating_groups, sorted_ranks, sorted_weights, squad_sizes)
         builders = self.factor_graph_builders(*args)
         args = builders + (min_delta,)
         layers = self.run_schedule(*args)
         # make result
+        # Unsquad teams again
+        _, sorted_rating_groups = _squad_sizes(sorted_rating_groups)
+        # This is the actual update of the ratings based on match results
         rating_layer, team_sizes = layers[0], _team_sizes(sorted_rating_groups)
         transformed_groups = []
         for start, end in zip([0] + team_sizes[:-1], team_sizes):
@@ -529,6 +584,7 @@ class TrueSkill(object):
 
         """
         rating_groups, keys = self.validate_rating_groups(rating_groups)
+        squad_sizes, rating_groups = _squad_sizes(rating_groups)
         weights = self.validate_weights(weights, rating_groups, keys)
         flatten_ratings = sum(map(tuple, rating_groups), ())
         flatten_weights = sum(map(tuple, weights), ())

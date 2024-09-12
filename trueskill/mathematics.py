@@ -83,7 +83,7 @@ class Gaussian(object):
         return self.mu >= other.mu
 
     def __repr__(self):
-        return 'N(mu={:.3f}, sigma={:.3f})'.format(self.mu, self.sigma)
+        return 'N(mu={:.3f}, sigma={:.3f})'.format(float(self.mu), self.sigma)
 
     def _repr_latex_(self):
         latex = r'\mathcal{{ N }}( {:.3f}, {:.3f}^2 )'.format(self.mu, self.sigma)
